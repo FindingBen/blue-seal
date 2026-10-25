@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import timedelta
+from urllib.parse import urlsplit
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,13 +22,56 @@ load_dotenv(BASE_DIR / ".env")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
+def _normalize_origin(value):
+    value = (value or '').strip()
+    if not value:
+        return None
+
+    parsed = urlsplit(value)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        return None
+
+    return f'{parsed.scheme}://{parsed.netloc}'
+
+def _unique_list(values):
+    seen = set()
+    items = []
+    for value in values:
+        if value in seen:
+            continue
+
+        seen.add(value)
+        items.append(value)
+
+    return items
+
+def _build_trusted_origins(frontend_url, origins_env):
+    return _unique_list(
+        _parse_origin_list(origins_env) + _parse_origin_list(frontend_url)
+    )
+
+def _parse_origin_list(value):
+    origins = []
+    for raw_origin in (value or '').split(','):
+        origin = _normalize_origin(raw_origin)
+        if origin:
+            origins.append(origin)
+
+    return origins
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-tk+!xor1x&#9j!y#8_@!ohmf!be)6!2l33c0v&6*u!c3mg686r'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    ".ngrok-free.app",
+    ".railway.app",
+]
+
 
 
 # Application definition
@@ -40,11 +85,30 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     "apps.accounts.apps.AccountsConfig",
+    "apps.classes.apps.ClassesConfig",
+    "apps.schedule.apps.ScheduleConfig",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
 
+
+SIMPLE_JWT = {
+    "USER_ID_FIELD": "account_id",
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+}
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+}
+
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -73,6 +137,26 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
+FRONTEND_URL = os.environ.get('FRONTEND_URL') or os.environ.get('FRONTEND_URL') or 'http://localhost:3000'
+
+
+_origins_env = os.environ.get('ORIGINS', '')
+CORS_ALLOWED_ORIGINS = _build_trusted_origins(FRONTEND_URL, _origins_env)
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_HEADERS = ["accept",
+                                              "accept-encoding",
+                                              "authorization",
+                                              "content-type",
+                                              "dnt",
+                                              "users",
+                                              "origin",
+                                              "user-agent",
+                                              "x-csrftoken",
+                                              "options",
+                                              "x-requested-with"]
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
