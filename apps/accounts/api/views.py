@@ -3,7 +3,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from apps.accounts.service import AccountService
-from .serializers import RegisterSerializer, CustomTokenSerializer, build_user_payload
+from .serializers import (
+    RegisterSerializer,
+    TutorSerializer,
+    CustomTokenSerializer,
+    build_user_payload,
+)
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.permissions import IsAuthenticated, AllowAny
 
@@ -19,6 +24,16 @@ class RegisterView(APIView):
             return Response({"user": user}, status=201)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class TutorView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        tutors = AccountService.get_tutors()
+        return Response(
+            {"tutors": TutorSerializer(tutors, many=True).data},
+            status=status.HTTP_200_OK,
+        )
 
 class GetUserInfoView(APIView):
     permission_classes = [IsAuthenticated]

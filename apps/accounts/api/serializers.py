@@ -24,6 +24,15 @@ class RegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError("Email already registered")
         return value
 
+
+class TutorSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(source="account_id", read_only=True)
+
+    class Meta:
+        model = User
+        fields = ["id", "name"]
+
+
 class CustomTokenSerializer(TokenObtainPairSerializer):
     username_field = "email"
 

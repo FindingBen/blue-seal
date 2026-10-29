@@ -139,6 +139,7 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 
 FRONTEND_URL = os.environ.get('FRONTEND_URL') or os.environ.get('FRONTEND_URL') or 'http://localhost:3000'
 
+TUTOR_USER = os.environ.get('TYPE_VAL')
 
 _origins_env = os.environ.get('ORIGINS', '')
 CORS_ALLOWED_ORIGINS = _build_trusted_origins(FRONTEND_URL, _origins_env)

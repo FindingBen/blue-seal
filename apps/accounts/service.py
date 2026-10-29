@@ -21,4 +21,9 @@ class AccountService:
             user=user
         )
 
+    @staticmethod
+    def get_tutors():
+        return User.objects.filter(user_type='tutor')
+    
+
         # verification = EmailVerification.objects.create(user=user)

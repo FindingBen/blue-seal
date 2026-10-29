@@ -31,6 +31,7 @@ class User(AbstractUser):
 
     USER_TYPE_CHOICES = [
         ("regular", "Regular"),
+        ("tutor","Tutor"),
         ("shopify", "Shopify"),
     ]
     username = None
