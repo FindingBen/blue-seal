@@ -52,7 +52,7 @@ class User(AbstractUser):
 class Wallet(models.Model):
     """Standard Wallet model"""
     user = models.OneToOneField("accounts.User", on_delete=models.CASCADE, related_name="wallet")
-    balance = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    balance = models.IntegerField(default=0)
     reserved = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     updated_at = models.DateTimeField(auto_now=True)
 

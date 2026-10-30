@@ -60,7 +60,7 @@ def _parse_origin_list(value):
     return origins
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-tk+!xor1x&#9j!y#8_@!ohmf!be)6!2l33c0v&6*u!c3mg686r'
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     "apps.accounts.apps.AccountsConfig",
     "apps.classes.apps.ClassesConfig",
     "apps.schedule.apps.ScheduleConfig",
+    "apps.payments.apps.PaymentsConfig",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -209,3 +210,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+DOMAIN_STRIPE_NAME = os.environ.get('DOMAIN_STRIPE_NAME')
+
+DOMAIN_STRIPE_PURCHASE_NAME = os.environ.get('DOMAIN_STRIPE_PURCHASE_NAME')
+
+DOMAIN_STRIPE_NAME_CANCEL = os.environ.get('DOMAIN_STRIPE_NAME_CANCEL')
+
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')

@@ -11,6 +11,8 @@ from .serializers import (
 )
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from apps.accounts.exceptions import WalletDoesNotExistError
+from apps.accounts.service import WalletTransactionService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,28 @@ class TutorView(APIView):
         tutors = AccountService.get_tutors()
         return Response(
             {"tutors": TutorSerializer(tutors, many=True).data},
+            status=status.HTTP_200_OK,
+        )
+
+class WalletView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            wallet = WalletTransactionService.get_wallet(request.user.pk)
+        except WalletDoesNotExistError:
+            return Response(
+                {"error": "Wallet not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            {
+                "balance": wallet.balance,
+                "reserved": wallet.reserved,
+                "available": wallet.balance - wallet.reserved,
+                "updated_at": wallet.updated_at,
+            },
             status=status.HTTP_200_OK,
         )
 

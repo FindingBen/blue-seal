@@ -1,5 +1,11 @@
 from django.urls import path
-from .views import (RegisterView, LoginView, GetUserInfoView, TutorView)
+from .views import (
+    GetUserInfoView,
+    LoginView,
+    RegisterView,
+    TutorView,
+    WalletView,
+)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
@@ -7,5 +13,6 @@ urlpatterns = [
     path("login/", LoginView.as_view()),
     path("token/refresh/", TokenRefreshView.as_view()),
     path("me/", GetUserInfoView.as_view()),
-    path('tutors/', TutorView.as_view())
+    path('tutors/', TutorView.as_view()),
+    path('wallet/', WalletView.as_view(), name="wallet"),
 ]

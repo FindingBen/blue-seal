@@ -5,7 +5,7 @@ class ClassesSerializer(serializers.ModelSerializer):
     class Meta:
         model = Classes
         fields = ['class_id', 'student', 'tutor', 'duration','class_name', 'scheduled_date','status', 'created_at', 'updated_at']
-        read_only_fields = ['student','tutor', 'created_at', 'updated_at']
+        read_only_fields = ['student', 'created_at', 'updated_at']
 
 
 class ContentsSerializer(serializers.ModelSerializer):

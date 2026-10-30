@@ -5,7 +5,9 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.accounts.models import ClassLedger, Wallet
 from apps.classes.models import Classes
+from apps.schedule.models import Schedule
 
 
 class ClassContentsApiTests(TestCase):
@@ -114,3 +116,95 @@ class TutorBookedClassesApiTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 403)
+
+
+class ClassBookingWalletTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.student = user_model.objects.create_user(
+            email="wallet-booking-student@example.com",
+            password="test-password",
+            name="Student",
+            user_type="regular",
+        )
+        self.tutor = user_model.objects.create_user(
+            email="wallet-booking-tutor@example.com",
+            password="test-password",
+            name="Tutor",
+            user_type="tutor",
+        )
+        self.wallet = Wallet.objects.create(user=self.student, balance=1)
+        self.client = APIClient()
+        self.client.force_authenticate(self.student)
+        self.class_date = timezone.now() + timedelta(days=2)
+        Schedule.objects.create(
+            account_id=self.tutor,
+            activity_type="available",
+            date_of=self.class_date - timedelta(hours=1),
+            duration=timedelta(hours=3),
+        )
+
+    def test_booking_deducts_one_class_credit(self):
+        response = self.client.post(
+            "/api/schedule/v1/",
+            {
+                "tutor": str(self.tutor.pk),
+                "date_of": self.class_date.isoformat(),
+                "duration": "01:00:00",
+                "activity_type": "class",
+            },
+            format="json",
+        )
+
+        self.wallet.refresh_from_db()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.wallet.balance, 0)
+        self.assertEqual(
+            ClassLedger.objects.filter(
+                wallet=self.wallet,
+                entry_type="debit",
+                amount=1,
+            ).count(),
+            1,
+        )
+        self.assertEqual(Classes.objects.filter(student=self.student).count(), 1)
+
+    def test_booking_without_class_credit_is_rejected_without_creating_booking(self):
+        self.wallet.balance = 0
+        self.wallet.save(update_fields=["balance"])
+
+        response = self.client.post(
+            "/api/schedule/v1/",
+            {
+                "tutor": str(self.tutor.pk),
+                "date_of": self.class_date.isoformat(),
+                "duration": "01:00:00",
+                "activity_type": "class",
+            },
+            format="json",
+        )
+
+        self.wallet.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Classes.objects.filter(student=self.student).count(), 0)
+        self.assertEqual(Schedule.objects.filter(account_id=self.student).count(), 0)
+        self.assertEqual(self.wallet.balance, 0)
+        self.assertEqual(ClassLedger.objects.filter(wallet=self.wallet).count(), 0)
+
+    def test_direct_class_booking_also_requires_and_spends_credit(self):
+        response = self.client.post(
+            "/api/classes/v1/",
+            {
+                "tutor": str(self.tutor.pk),
+                "class_name": "Direct booking",
+                "scheduled_date": self.class_date.isoformat(),
+                "duration": "01:00:00",
+                "status": "scheduled",
+            },
+            format="json",
+        )
+
+        self.wallet.refresh_from_db()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.wallet.balance, 0)
+        self.assertEqual(Classes.objects.filter(student=self.student).count(), 1)

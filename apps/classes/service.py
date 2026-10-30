@@ -1,12 +1,19 @@
 from .models import Classes
-from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q
+from rest_framework.exceptions import ValidationError
+from apps.accounts.exceptions import (
+    InsufficientClassBalanceError,
+    WalletDoesNotExistError,
+)
+from apps.accounts.service import WalletTransactionService
 
 class ClassesService:
     @staticmethod
+    @transaction.atomic
     def create_class(class_data, user):
         """Create a class for the given user."""
-        return Classes.objects.create(
+        class_instance = Classes.objects.create(
             student=user,
             tutor=class_data["tutor"],
             class_name=class_data["class_name"],
@@ -14,6 +21,14 @@ class ClassesService:
             duration=class_data["duration"],
             status=class_data.get("status", "scheduled"),
         )
+        try:
+            WalletTransactionService.consume_class_credit(
+                str(user.pk),
+                str(class_instance.pk),
+            )
+        except (InsufficientClassBalanceError, WalletDoesNotExistError) as exc:
+            raise ValidationError(str(exc)) from exc
+        return class_instance
 
     @staticmethod
     def update_class(class_instance, class_data, user):

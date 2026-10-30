@@ -1,9 +1,8 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
-from django.core.exceptions import ValidationError
 from .serializers import ClassesSerializer, ContentsSerializer
 from apps.classes.models import Contents
 from apps.classes.service import ClassesService
@@ -47,25 +46,18 @@ class ClassesViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def perform_create(self, serializer):
-        try:
-            campaign_data = serializer.validated_data
-            campaign = ClassesService.create_class(campaign_data, self.request.user)
-            serializer.instance = campaign
-        except ValidationError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        class_data = serializer.validated_data
+        serializer.instance = ClassesService.create_class(class_data, self.request.user)
 
     def perform_update(self, serializer):
-        try:
-            campaign_data = serializer.validated_data
-            campaign = ClassesService.update_class(serializer.instance, campaign_data, self.request.user)
-            serializer.instance = campaign
-        except ValidationError as e:
-            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        class_data = serializer.validated_data
+        serializer.instance = ClassesService.update_class(
+            serializer.instance,
+            class_data,
+            self.request.user,
+        )
 
     def perform_destroy(self, instance):
-        try:
-            ClassesService.delete_class(instance, self.request.user)
-        except ValidationError as e:
-            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        ClassesService.delete_class(instance, self.request.user)
 
     
