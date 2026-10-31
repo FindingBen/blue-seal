@@ -26,6 +26,9 @@ class Schedule(models.Model):
 
         return str_schedule_name
 
+    def __str__(self):
+        return str(self.schedule_name)+'-'+str(self.date_of) + ' - ' + str(self.activity_type)
+
     @staticmethod
     def date_validation(date_of):
         if date_of < timezone.now():

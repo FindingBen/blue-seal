@@ -37,6 +37,16 @@ class TutorView(APIView):
             status=status.HTTP_200_OK,
         )
 
+class StudentView(APIView):
+    permission_classes=[IsAuthenticated]
+
+    def get(self, request):
+        students = AccountService.get_students()
+        return Response(
+                    {"students": TutorSerializer(students, many=True).data},
+                    status=status.HTTP_200_OK,
+                )
+
 class WalletView(APIView):
     permission_classes = [IsAuthenticated]
 

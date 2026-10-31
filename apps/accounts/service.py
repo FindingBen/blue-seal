@@ -29,9 +29,9 @@ class AccountService:
         return User.objects.filter(user_type='tutor')
 
 
-        # verification = EmailVerification.objects.create(user=user)
-
-
+    @staticmethod
+    def get_students():
+        return User.objects.filter(user_type='regular')
 
 class WalletTransactionService:
     @staticmethod

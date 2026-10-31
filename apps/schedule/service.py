@@ -81,16 +81,64 @@ class ScheduleService:
 
 
     @staticmethod
+    @transaction.atomic
     def create_availability(user, data):
         if user.user_type != ScheduleService.user_type_val:
-            raise UserTypeError("You can't select availability!") 
+            raise UserTypeError("You can't select availability!")
 
-        return Schedule.objects.create(
-                    account_id=user,
-                    schedule_name=data["schedule_name"],
-                    activity_type=data["activity_type"],
-                    date_of=data["date_of"],
-                    duration=data["duration"],
+        schedule = Schedule.objects.create(
+            account_id=user,
+            schedule_name=data["schedule_name"],
+            activity_type=data["activity_type"],
+            date_of=data["date_of"],
+            duration=data["duration"],
+        )
+
+        if data["activity_type"] == "unavailable":
+            ScheduleService.apply_unavailability(schedule)
+
+        return schedule
+
+    @staticmethod
+    def apply_unavailability(unavailable_schedule):
+        unavailable_start = unavailable_schedule.date_of
+        unavailable_end = unavailable_start + unavailable_schedule.duration
+        available_slots = Schedule.objects.filter(
+            account_id=unavailable_schedule.account_id,
+            activity_type="available",
+            date_of__lt=unavailable_end,
+        )
+
+        for slot in available_slots:
+            slot_start = slot.date_of
+            slot_end = slot_start + slot.duration
+            if slot_end <= unavailable_start:
+                continue
+
+            remaining_intervals = []
+            if slot_start < unavailable_start:
+                remaining_intervals.append((slot_start, unavailable_start))
+            if slot_end > unavailable_end:
+                remaining_intervals.append((unavailable_end, slot_end))
+
+            if not remaining_intervals:
+                slot.delete()
+                continue
+
+            slot.date_of, remaining_end = remaining_intervals[0]
+            slot.duration = remaining_end - slot.date_of
+            slot.save(update_fields=["date_of", "duration"])
+
+            if len(remaining_intervals) == 2:
+                remaining_start, remaining_end = remaining_intervals[1]
+                Schedule.objects.create(
+                    account_id=slot.account_id,
+                    class_id=slot.class_id,
+                    schedule_name=slot.schedule_name,
+                    comments=slot.comments,
+                    activity_type=slot.activity_type,
+                    date_of=remaining_start,
+                    duration=remaining_end - remaining_start,
                 )
 
     @staticmethod
@@ -101,7 +149,8 @@ class ScheduleService:
             activity_type="available",
             date_of__lte=selected_date,
         )
-
+        print("DATE REQ",requested_end)
+        print("AVA",available_slots)
         if not any(
             slot.date_of + slot.duration >= requested_end
             for slot in available_slots

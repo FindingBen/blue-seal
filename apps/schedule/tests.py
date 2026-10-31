@@ -1,13 +1,16 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
+from django.contrib.admin.sites import AdminSite
 from django.test import SimpleTestCase
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from apps.schedule.admin import ScheduleAdmin
 from apps.schedule.api.views import TutorCalendarView
+from apps.schedule.models import Schedule
 from apps.schedule.service import ScheduleService
 
 
@@ -96,6 +99,118 @@ class CheckAvailabilityTests(SimpleTestCase):
             ScheduleService.check_availability(
                 object(), self.selected_date, self.duration
             )
+
+
+class CreateAvailabilityTests(SimpleTestCase):
+    def setUp(self):
+        self.tutor = SimpleNamespace(user_type=ScheduleService.user_type_val)
+        self.available_start = datetime(2026, 10, 31, 8, tzinfo=timezone.utc)
+        self.available_slot = SimpleNamespace(
+            account_id=self.tutor,
+            class_id=None,
+            schedule_name="Available",
+            comments=None,
+            activity_type="available",
+            date_of=self.available_start,
+            duration=timedelta(hours=12),
+            save=Mock(),
+            delete=Mock(),
+        )
+
+    def create_unavailability(self, start, duration):
+        return ScheduleService.create_availability.__wrapped__(
+            self.tutor,
+            {
+                "schedule_name": "Unavailable",
+                "activity_type": "unavailable",
+                "date_of": start,
+                "duration": duration,
+            },
+        )
+
+    @patch("apps.schedule.service.Schedule.objects.create")
+    @patch("apps.schedule.service.Schedule.objects.filter")
+    def test_unavailable_at_start_shortens_available_slot(
+        self, filter_schedules, create_schedule
+    ):
+        filter_schedules.return_value = [self.available_slot]
+        unavailable_start = self.available_start
+        create_schedule.side_effect = lambda **fields: SimpleNamespace(**fields)
+
+        self.create_unavailability(unavailable_start, timedelta(hours=3))
+
+        self.assertEqual(
+            self.available_slot.date_of,
+            datetime(2026, 10, 31, 11, tzinfo=timezone.utc),
+        )
+        self.assertEqual(self.available_slot.duration, timedelta(hours=9))
+        self.available_slot.save.assert_called_once_with(
+            update_fields=["date_of", "duration"]
+        )
+        self.available_slot.delete.assert_not_called()
+        create_schedule.assert_called_once()
+
+    @patch("apps.schedule.service.Schedule.objects.create")
+    @patch("apps.schedule.service.Schedule.objects.filter")
+    def test_unavailable_in_middle_splits_available_slot(
+        self, filter_schedules, create_schedule
+    ):
+        filter_schedules.return_value = [self.available_slot]
+        create_schedule.side_effect = lambda **fields: SimpleNamespace(**fields)
+        unavailable_start = datetime(2026, 10, 31, 11, tzinfo=timezone.utc)
+
+        self.create_unavailability(unavailable_start, timedelta(hours=1))
+
+        self.assertEqual(self.available_slot.date_of, self.available_start)
+        self.assertEqual(self.available_slot.duration, timedelta(hours=3))
+        self.available_slot.save.assert_called_once_with(
+            update_fields=["date_of", "duration"]
+        )
+        self.assertEqual(create_schedule.call_count, 2)
+        create_schedule.assert_any_call(
+            account_id=self.tutor,
+            class_id=None,
+            schedule_name="Available",
+            comments=None,
+            activity_type="available",
+            date_of=datetime(2026, 10, 31, 12, tzinfo=timezone.utc),
+            duration=timedelta(hours=8),
+        )
+
+    @patch("apps.schedule.service.Schedule.objects.create")
+    @patch("apps.schedule.service.Schedule.objects.filter")
+    def test_unavailable_covering_slot_removes_availability(
+        self, filter_schedules, create_schedule
+    ):
+        filter_schedules.return_value = [self.available_slot]
+        create_schedule.side_effect = lambda **fields: SimpleNamespace(**fields)
+
+        self.create_unavailability(
+            self.available_start - timedelta(hours=1),
+            timedelta(hours=14),
+        )
+
+        self.available_slot.delete.assert_called_once()
+        self.available_slot.save.assert_not_called()
+        create_schedule.assert_called_once()
+
+
+class ScheduleAdminTests(SimpleTestCase):
+    @patch("apps.schedule.admin.ScheduleService.apply_unavailability")
+    def test_new_unavailable_schedule_cuts_existing_availability(
+        self, apply_unavailability
+    ):
+        schedule = SimpleNamespace(
+            _state=SimpleNamespace(adding=True),
+            activity_type="unavailable",
+            save=Mock(),
+        )
+        schedule_admin = ScheduleAdmin(Schedule, AdminSite())
+
+        schedule_admin.save_model(object(), schedule, None, False)
+
+        schedule.save.assert_called_once()
+        apply_unavailability.assert_called_once_with(schedule)
 
 
 class TutorCalendarViewTests(SimpleTestCase):
