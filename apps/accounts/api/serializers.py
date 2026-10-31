@@ -44,7 +44,12 @@ class TutorSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "name"]
+        fields = ["id", "name", "price_per_class"]
+
+
+class TutorPriceUpdateSerializer(serializers.Serializer):
+    student_id = serializers.UUIDField()
+    price_per_class = serializers.IntegerField(min_value=0)
 
 
 class CustomTokenSerializer(TokenObtainPairSerializer):

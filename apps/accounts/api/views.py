@@ -9,8 +9,9 @@ from apps.accounts.service import AccountService
 from .serializers import (
     RegisterSerializer,
     TutorSerializer,
+    TutorPriceUpdateSerializer,
     CustomTokenSerializer,
-    build_user_payload,
+    build_user_payload
 )
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -94,6 +95,40 @@ class StudentView(APIView):
                     {"students": TutorSerializer(students, many=True).data},
                     status=status.HTTP_200_OK,
                 )
+
+    def patch(self, request):
+        if request.user.user_type != "tutor":
+            return Response(
+                {"error": "Only tutors can update the class price."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = TutorPriceUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        student = AccountService.get_students().filter(
+            account_id=serializer.validated_data["student_id"],
+            tutor=request.user,
+        ).first()
+        if student is None:
+            return Response(
+                {"error": "Student not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        student.price_per_class = serializer.validated_data["price_per_class"]
+        student.save(update_fields=["price_per_class"])
+        return Response(
+            {
+                "student_id": str(student.account_id),
+                "price_per_class": student.price_per_class,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 class WalletView(APIView):
     permission_classes = [IsAuthenticated]

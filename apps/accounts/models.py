@@ -48,7 +48,15 @@ class User(AbstractUser):
         null=True,
         unique=True,
     )
-
+    tutor = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        related_name="students",
+        null=True,
+        blank=True,
+        limit_choices_to={"user_type": "tutor"},
+    )
+    price_per_class = models.IntegerField(default=15)
     user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES)
 
     created_at = models.DateTimeField(auto_now_add=True)

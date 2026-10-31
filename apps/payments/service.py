@@ -26,11 +26,12 @@ class PaymentOrderService:
         ).first()
         if package is None:
             raise ValidationError("The selected class package is unavailable.")
-        if package.class_count <= 0 or package.price <= 0:
+        if package.class_count <= 0 or user.price_per_class <= 0:
             raise ValidationError("The selected class package has invalid pricing.")
         if len(package.currency) != 3 or not package.currency.isalpha():
             raise ValidationError("The selected class package has an invalid currency.")
 
+        total_price = Decimal(user.price_per_class) * package.class_count
         order = PaymentOrder.objects.create(
             user=user,
             package=package,
@@ -38,7 +39,7 @@ class PaymentOrderService:
             purchase_kind=PaymentOrder.PurchaseKind.ONE_TIME,
             status=PaymentOrder.Status.PENDING,
             price_snapshot={
-                "amount": str(package.price),
+                "amount": str(total_price),
                 "currency_code": package.currency.lower(),
             },
             credits_snapshot={
@@ -69,7 +70,7 @@ class PaymentOrderService:
                     {
                         "price_data": {
                             "currency": package.currency.lower(),
-                            "unit_amount": int(package.price * Decimal("100")),
+                            "unit_amount": int(total_price * Decimal("100")),
                             "product_data": {"name": package.name},
                         },
                         "quantity": 1,

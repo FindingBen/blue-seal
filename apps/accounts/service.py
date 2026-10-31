@@ -35,7 +35,8 @@ class AccountService:
             password=password,
             name=name,
             is_active=False,
-            user_type=user_type
+            user_type=user_type,
+            tutor=invitation.created_by,
         )
 
         Wallet.objects.create(

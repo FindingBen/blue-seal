@@ -68,6 +68,8 @@ class StripeClassPackageTests(TestCase):
             id="cs_test_123",
             url="https://checkout.stripe.test/session",
         )
+        self.user.price_per_class = 20
+        self.user.save(update_fields=["price_per_class"])
         self.client.force_authenticate(self.user)
 
         response = self.client.post(
@@ -83,6 +85,13 @@ class StripeClassPackageTests(TestCase):
         self.assertEqual(order.provider, PaymentOrder.Provider.STRIPE)
         self.assertEqual(order.status, PaymentOrder.Status.PENDING)
         self.assertEqual(order.credits_snapshot["amount"], 3)
+        self.assertEqual(order.price_snapshot["amount"], "60")
+        self.assertEqual(
+            create_session.call_args.kwargs["line_items"][0]["price_data"][
+                "unit_amount"
+            ],
+            6000,
+        )
         self.assertEqual(order.provider_charge_id, "cs_test_123")
         self.assertNotIn(
             "payment_method_types",

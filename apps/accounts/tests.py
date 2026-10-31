@@ -96,6 +96,7 @@ class RegisterApiTests(TestCase):
         self.invitation.refresh_from_db()
         self.assertEqual(response.status_code, 201)
         self.assertEqual(user.stripe_customer_id, "cus_test_123")
+        self.assertEqual(user.tutor, self.tutor)
         self.assertTrue(Wallet.objects.filter(user=user).exists())
         self.assertTrue(self.invitation.is_used)
         create_customer.assert_called_once_with(
@@ -209,3 +210,106 @@ class RegisterApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(InvatationToken.objects.count(), 1)
+
+
+class TutorPriceUpdateApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.tutor = User.objects.create_user(
+            email="tutor@example.test",
+            password="Secure-test-password-123",
+            name="Tutor",
+            user_type="tutor",
+        )
+        self.student = User.objects.create_user(
+            email="tutor-student@example.test",
+            password="Secure-test-password-123",
+            name="Tutor Student",
+            user_type="regular",
+            tutor=self.tutor,
+        )
+        self.client.force_authenticate(self.tutor)
+
+    def test_tutor_can_update_own_price_per_class(self):
+        response = self.client.patch(
+            "/api/accounts/students/",
+            {
+                "student_id": str(self.student.account_id),
+                "price_per_class": 25,
+            },
+            format="json",
+        )
+
+        self.student.refresh_from_db()
+        self.tutor.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "student_id": str(self.student.account_id),
+                "price_per_class": 25,
+            },
+        )
+        self.assertEqual(self.student.price_per_class, 25)
+        self.assertEqual(self.tutor.price_per_class, 15)
+
+    def test_non_tutor_cannot_update_price_per_class(self):
+        student = User.objects.create_user(
+            email="student@example.test",
+            password="Secure-test-password-123",
+            name="Student",
+            user_type="regular",
+        )
+        self.client.force_authenticate(student)
+
+        response = self.client.patch(
+            "/api/accounts/students/",
+            {"price_per_class": 25},
+            format="json",
+        )
+
+        student.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(student.price_per_class, 15)
+
+    def test_price_per_class_must_be_nonnegative_integer(self):
+        response = self.client.patch(
+            "/api/accounts/students/",
+            {
+                "student_id": str(self.student.account_id),
+                "price_per_class": -1,
+            },
+            format="json",
+        )
+
+        self.student.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.student.price_per_class, 15)
+
+    def test_tutor_cannot_update_student_invited_by_another_tutor(self):
+        other_tutor = User.objects.create_user(
+            email="other-tutor@example.test",
+            password="Secure-test-password-123",
+            name="Other Tutor",
+            user_type="tutor",
+        )
+        other_student = User.objects.create_user(
+            email="other-student@example.test",
+            password="Secure-test-password-123",
+            name="Other Student",
+            user_type="regular",
+            tutor=other_tutor,
+        )
+
+        response = self.client.patch(
+            "/api/accounts/students/",
+            {
+                "student_id": str(other_student.account_id),
+                "price_per_class": 25,
+            },
+            format="json",
+        )
+
+        other_student.refresh_from_db()
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(other_student.price_per_class, 15)
