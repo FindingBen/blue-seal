@@ -90,6 +90,23 @@ class StripeClassPackageTests(TestCase):
         )
         create_session.assert_called_once()
 
+    @patch("apps.payments.service.stripe.checkout.Session.create")
+    def test_checkout_uses_existing_stripe_customer(self, create_session):
+        create_session.return_value = SimpleNamespace(
+            id="cs_test_123",
+            url="https://checkout.stripe.test/session",
+        )
+        self.user.stripe_customer_id = "cus_test_123"
+        self.user.save(update_fields=["stripe_customer_id"])
+
+        PaymentOrderService.create_checkout_session(
+            user=self.user,
+            package_id=str(self.package.pk),
+        )
+
+        self.assertEqual(create_session.call_args.kwargs["customer"], "cus_test_123")
+        self.assertNotIn("customer_email", create_session.call_args.kwargs)
+
     @patch("apps.payments.api.views.stripe.Webhook.construct_event")
     @patch("apps.payments.service.stripe.checkout.Session.create")
     def test_webhook_endpoint_credits_wallet_after_verified_payment(

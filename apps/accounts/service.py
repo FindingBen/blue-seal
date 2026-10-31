@@ -1,7 +1,9 @@
 
 from django.db import transaction
+from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 from .exceptions import InsufficientClassBalanceError, WalletDoesNotExistError
-from .models import ClassLedger, User, Wallet
+from .models import ClassLedger, InvatationToken, User, Wallet
 
 
 class AccountService:
@@ -9,9 +11,25 @@ class AccountService:
 
     @staticmethod
     @transaction.atomic
-    def register_user(email, password, name, user_type):
-        print(email,password,name,user_type)
+    def register_user(email, password, name, user_type, invitation_token):
         """Service model for accounts"""
+        invitation = (
+            InvatationToken.objects.select_for_update()
+            .filter(token=invitation_token)
+            .first()
+        )
+        if (
+            invitation is None
+            or invitation.is_used
+            or invitation.expires_at <= timezone.now()
+        ):
+            raise ValidationError(
+                {"invitation_token": "The invitation token is invalid, expired, or already used."}
+            )
+
+        invitation.is_used = True
+        invitation.save(update_fields=["is_used"])
+
         user = User.objects.create_user(
             email=email,
             password=password,
@@ -23,6 +41,7 @@ class AccountService:
         Wallet.objects.create(
             user=user
         )
+        return user
 
     @staticmethod
     def get_tutors():

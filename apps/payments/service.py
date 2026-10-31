@@ -58,6 +58,11 @@ class PaymentOrderService:
 
         try:
             stripe.api_key = settings.STRIPE_SECRET_KEY
+            customer_details = (
+                {"customer": user.stripe_customer_id}
+                if user.stripe_customer_id
+                else {"customer_email": user.email}
+            )
             session = stripe.checkout.Session.create(
                 mode="payment",
                 line_items=[
@@ -70,7 +75,7 @@ class PaymentOrderService:
                         "quantity": 1,
                     }
                 ],
-                customer_email=user.email,
+                **customer_details,
                 client_reference_id=str(user.pk),
                 metadata={
                     "payment_order_id": str(order.pk),

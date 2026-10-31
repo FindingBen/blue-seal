@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 
@@ -41,6 +42,12 @@ class User(AbstractUser):
     account_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
+    stripe_customer_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        unique=True,
+    )
 
     user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES)
 
@@ -81,3 +88,21 @@ class EmailVerification(models.Model):
     is_used = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+class InvatationToken(models.Model):
+    LIFETIME = timedelta(minutes=20)
+
+    token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="created_invitations",
+    )
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    opened_at = models.DateTimeField(null=True)
+
+    @property
+    def expires_at(self):
+        return self.created_at + self.LIFETIME

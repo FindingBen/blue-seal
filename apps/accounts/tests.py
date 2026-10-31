@@ -1,12 +1,17 @@
 from decimal import Decimal
+from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
+from rest_framework.test import APIClient
 
 from apps.accounts.exceptions import WalletDoesNotExistError
-from apps.accounts.models import User, Wallet
+from apps.accounts.models import InvatationToken, User, Wallet
 from apps.accounts.service import WalletTransactionService
-from rest_framework.test import APIClient
+import stripe
 
 
 class WalletApiTests(TestCase):
@@ -57,3 +62,150 @@ class WalletApiTests(TestCase):
 
         with self.assertRaises(WalletDoesNotExistError):
             WalletTransactionService.get_wallet(self.user.pk)
+
+
+class RegisterApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.tutor = User.objects.create_user(
+            email="tutor@example.test",
+            password="Secure-test-password-123",
+            name="Tutor",
+            user_type="tutor",
+        )
+        self.invitation = InvatationToken.objects.create(created_by=self.tutor)
+        self.registration_data = {
+            "email": "jane@example.test",
+            "password": "Secure-test-password-123",
+            "name": "Jane Doe",
+            "user_type": "regular",
+            "invitation_token": str(self.invitation.token),
+        }
+
+    @patch("apps.accounts.api.views.stripe.Customer.create")
+    def test_registration_creates_stripe_customer(self, create_customer):
+        create_customer.return_value = SimpleNamespace(id="cus_test_123")
+
+        response = self.client.post(
+            "/api/accounts/register/",
+            self.registration_data,
+            format="json",
+        )
+
+        user = User.objects.get(email="jane@example.test")
+        self.invitation.refresh_from_db()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(user.stripe_customer_id, "cus_test_123")
+        self.assertTrue(Wallet.objects.filter(user=user).exists())
+        self.assertTrue(self.invitation.is_used)
+        create_customer.assert_called_once_with(
+            name="Jane Doe",
+            email="jane@example.test",
+            metadata={"account_id": str(user.pk)},
+        )
+
+    @patch("apps.accounts.api.views.stripe.Customer.create")
+    def test_registration_rolls_back_if_stripe_customer_creation_fails(
+        self, create_customer
+    ):
+        create_customer.side_effect = stripe.StripeError(
+            "Stripe customer creation failed."
+        )
+
+        with self.assertLogs("apps.accounts.api.views", level="ERROR"):
+            response = self.client.post(
+                "/api/accounts/register/",
+                self.registration_data,
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertFalse(User.objects.filter(email="jane@example.test").exists())
+        self.invitation.refresh_from_db()
+        self.assertFalse(self.invitation.is_used)
+
+    def test_registration_requires_invitation_token(self):
+        registration_data = self.registration_data.copy()
+        registration_data.pop("invitation_token")
+
+        response = self.client.post(
+            "/api/accounts/register/",
+            registration_data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("invitation_token", response.json())
+
+    def test_registration_rejects_unknown_invitation(self):
+        registration_data = self.registration_data.copy()
+        registration_data["invitation_token"] = (
+            "3e8ec7fe-8878-4ed8-bacc-9f4abce0dc8b"
+        )
+
+        response = self.client.post(
+            "/api/accounts/register/",
+            registration_data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(User.objects.filter(email="jane@example.test").exists())
+
+    def test_registration_rejects_expired_invitation(self):
+        InvatationToken.objects.filter(pk=self.invitation.pk).update(
+            created_at=timezone.now() - timedelta(minutes=21)
+        )
+
+        response = self.client.post(
+            "/api/accounts/register/",
+            self.registration_data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(User.objects.filter(email="jane@example.test").exists())
+
+    def test_registration_rejects_used_invitation(self):
+        self.invitation.is_used = True
+        self.invitation.save(update_fields=["is_used"])
+
+        response = self.client.post(
+            "/api/accounts/register/",
+            self.registration_data,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(User.objects.filter(email="jane@example.test").exists())
+
+    def test_tutor_can_create_invitation_valid_for_twenty_minutes(self):
+        self.client.force_authenticate(self.tutor)
+        before_request = timezone.now()
+
+        response = self.client.post(reverse("invitation-create"), {}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        invitation = InvatationToken.objects.get(token=response.json()["token"])
+        self.assertEqual(invitation.created_by, self.tutor)
+        self.assertEqual(
+            response.json()["expires_at"],
+            (invitation.created_at + timedelta(minutes=20)).isoformat().replace(
+                "+00:00", "Z"
+            ),
+        )
+        self.assertGreaterEqual(invitation.created_at, before_request)
+
+    def test_non_tutor_cannot_create_invitation(self):
+        student = User.objects.create_user(
+            email="student@example.test",
+            password="Secure-test-password-123",
+            name="Student",
+            user_type="regular",
+        )
+        self.client.force_authenticate(student)
+
+        response = self.client.post(reverse("invitation-create"), {}, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(InvatationToken.objects.count(), 1)

@@ -1,4 +1,7 @@
 import logging
+import stripe
+from django.conf import settings
+from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -12,6 +15,7 @@ from .serializers import (
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from apps.accounts.exceptions import WalletDoesNotExistError
+from apps.accounts.models import InvatationToken
 from apps.accounts.service import WalletTransactionService
 
 logger = logging.getLogger(__name__)
@@ -19,13 +23,57 @@ logger = logging.getLogger(__name__)
 class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
-        print(request.data)
         if serializer.is_valid():
-            user = AccountService.register_user(**serializer.validated_data)
+            try:
+                with transaction.atomic():
+                    user = AccountService.register_user(
+                        **serializer.validated_data
+                    )
+                    stripe.api_key = settings.STRIPE_SECRET_KEY
+                    customer = stripe.Customer.create(
+                        name=user.name,
+                        email=user.email,
+                        metadata={"account_id": str(user.pk)},
+                    )
+                    user.stripe_customer_id = customer.id
+                    user.save(update_fields=["stripe_customer_id"])
+            except stripe.StripeError:
+                logger.exception(
+                    "Could not create Stripe customer during registration."
+                )
+                return Response(
+                    {"error": "Unable to complete account registration."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
 
-            return Response({"user": user}, status=201)
+            return Response(
+                {"user": build_user_payload(user)},
+                status=status.HTTP_201_CREATED,
+            )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class InvitationTokenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.user_type != "tutor":
+            return Response(
+                {"error": "Only tutors can create invitation tokens."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        invitation = InvatationToken.objects.create(created_by=request.user)
+        return Response(
+            {
+                "token": str(invitation.token),
+                "created_at": invitation.created_at,
+                "expires_at": invitation.expires_at,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class TutorView(APIView):
     permission_classes = [IsAuthenticated]
