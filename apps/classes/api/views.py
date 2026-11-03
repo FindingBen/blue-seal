@@ -3,9 +3,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
-from .serializers import ClassesSerializer, ContentsSerializer
-from apps.classes.models import Contents
-from apps.classes.service import ClassesService
+from django.db.models import Q
+from .serializers import ClassesSerializer, ContentsSerializer, NotebookSerializer
+from apps.classes.models import Contents, Notebook
+from apps.classes.service import ClassesService, NotebookService
 
 
 class TutorBookedClassesView(viewsets.ViewSet):
@@ -60,4 +61,19 @@ class ClassesViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         ClassesService.delete_class(instance, self.request.user)
 
-    
+
+class NotebookViewSet(viewsets.ModelViewSet):
+    serializer_class = NotebookSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        return Notebook.objects.filter(
+            Q(student=self.request.user) | Q(tutor=self.request.user)
+        )
+
+    def perform_create(self, serializer):
+        serializer.instance = NotebookService.create_notebook(
+            serializer.validated_data,
+            self.request.user,
+        )

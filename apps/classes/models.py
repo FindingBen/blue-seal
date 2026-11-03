@@ -1,6 +1,23 @@
 import uuid
 from django.db import models
 
+class Notebook(models.Model):
+    notebook_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    student = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="student_notebook",
+        null=True
+    )
+    tutor = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="tutor_notebook",
+        null=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
 class Classes(models.Model):
     STATUS_CHOICE = [
         ("done", "Done"),
@@ -21,6 +38,13 @@ class Classes(models.Model):
         on_delete=models.CASCADE,
         related_name="tutored_classes",
         null=True
+    )
+    notebook = models.ForeignKey(
+        Notebook,
+        on_delete=models.SET_NULL,
+        related_name="classes",
+        null=True,
+        blank=True,
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICE)
     scheduled_date = models.DateTimeField()

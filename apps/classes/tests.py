@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import ClassLedger, Wallet
-from apps.classes.models import Classes
+from apps.classes.models import Classes, Notebook
 from apps.schedule.models import Schedule
 
 
@@ -49,6 +49,52 @@ class ClassContentsApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["class_content"], content)
+
+
+class NotebookApiTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.tutor = user_model.objects.create_user(
+            email="notebook-tutor@example.com",
+            ******,
+            name="Tutor",
+            user_type="tutor",
+        )
+        self.student = user_model.objects.create_user(
+            email="notebook-student@example.com",
+            ******,
+            name="Student",
+            user_type="regular",
+            tutor=self.tutor,
+        )
+        self.client = APIClient()
+        self.url = "/api/classes/notebooks/"
+
+    def test_tutor_can_create_notebook_for_their_student(self):
+        self.client.force_authenticate(self.tutor)
+
+        response = self.client.post(
+            self.url,
+            {"student": str(self.student.pk)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        notebook = Notebook.objects.get()
+        self.assertEqual(notebook.student, self.student)
+        self.assertEqual(notebook.tutor, self.tutor)
+
+    def test_student_cannot_create_notebook(self):
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(
+            self.url,
+            {"student": str(self.student.pk)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Notebook.objects.exists())
 
 
 class TutorBookedClassesApiTests(TestCase):

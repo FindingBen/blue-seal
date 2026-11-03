@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from apps.accounts.models import User
-from apps.classes.models import Classes
+from apps.classes.models import Classes, Notebook
 from apps.schedule.models import Schedule
 
 
@@ -36,6 +36,12 @@ class ScheduleSerializer(serializers.ModelSerializer):
         queryset=User.objects.all(),
         write_only=True,
         required=False,
+    )
+    notebook = serializers.PrimaryKeyRelatedField(
+        queryset=Notebook.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
     )
 
     class Meta:

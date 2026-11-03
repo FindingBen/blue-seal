@@ -64,7 +64,8 @@ class ScheduleService:
                 "class_name": f'{user.name} - {class_data["date_of"]}',
                 "duration": class_data["duration"],
                 "status": class_data.get("status", "scheduled"),
-                "tutor": tutor
+                "tutor": tutor,
+                "notebook": class_data.get("notebook"),
             },
             user,
         )
