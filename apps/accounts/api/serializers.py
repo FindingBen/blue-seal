@@ -52,6 +52,10 @@ class TutorPriceUpdateSerializer(serializers.Serializer):
     price_per_class = serializers.IntegerField(min_value=0)
 
 
+class StudentActivationSerializer(serializers.Serializer):
+    student_id = serializers.UUIDField()
+
+
 class CustomTokenSerializer(TokenObtainPairSerializer):
     username_field = "email"
 

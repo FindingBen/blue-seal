@@ -10,6 +10,7 @@ from .serializers import (
     RegisterSerializer,
     TutorSerializer,
     TutorPriceUpdateSerializer,
+    StudentActivationSerializer,
     CustomTokenSerializer,
     build_user_payload
 )
@@ -129,6 +130,45 @@ class StudentView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class ActivateStudentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.user_type != "tutor":
+            return Response(
+                {"error": "Only tutors can activate students."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = StudentActivationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        student = AccountService.get_students().filter(
+            account_id=serializer.validated_data["student_id"],
+            tutor=request.user,
+        ).first()
+        if student is None:
+            return Response(
+                {"error": "Student not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        student.is_active = True
+        student.save(update_fields=["is_active"])
+        return Response(
+            {
+                "student_id": str(student.account_id),
+                "is_active": student.is_active,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 class WalletView(APIView):
     permission_classes = [IsAuthenticated]

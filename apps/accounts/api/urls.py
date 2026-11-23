@@ -6,7 +6,8 @@ from .views import (
     RegisterView,
     TutorView,
     WalletView,
-    StudentView
+    StudentView,
+    ActivateStudentView
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -19,4 +20,5 @@ urlpatterns = [
     path('tutors/', TutorView.as_view()),
     path('wallet/', WalletView.as_view(), name="wallet"),
     path('students/', StudentView.as_view()),
+    path('students/activate/', ActivateStudentView.as_view()),
 ]
