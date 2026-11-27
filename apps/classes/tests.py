@@ -1,3 +1,4 @@
+import base64
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -6,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import ClassLedger, Wallet
-from apps.classes.models import Classes, Notebook
+from apps.classes.models import Classes, Notebook, YjsContent
 from apps.schedule.models import Schedule
 
 
@@ -49,6 +50,173 @@ class ClassContentsApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["class_content"], content)
+
+
+class YjsContentApiTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.tutor = user_model.objects.create_user(
+            email="yjs-tutor@example.com",
+            password="test-password",
+            name="Tutor",
+            user_type="tutor",
+        )
+        self.student = user_model.objects.create_user(
+            email="yjs-student@example.com",
+            password="test-password",
+            name="Student",
+            user_type="regular",
+            tutor=self.tutor,
+        )
+        self.other_user = user_model.objects.create_user(
+            email="yjs-other@example.com",
+            password="test-password",
+            name="Other",
+            user_type="regular",
+        )
+        notebook = Notebook.objects.create(student=self.student, tutor=self.tutor)
+        self.class_instance = Classes.objects.create(
+            student=self.student,
+            tutor=self.tutor,
+            notebook=notebook,
+            status="scheduled",
+            scheduled_date=timezone.now() + timedelta(days=1),
+            duration=timedelta(hours=1),
+            class_name="Yjs test class",
+        )
+        self.client = APIClient()
+        self.url = (
+            f"/api/classes/v1/{self.class_instance.pk}/yjs-content/"
+        )
+
+    def test_class_participant_can_create_and_reuse_yjs_content(self):
+        self.client.force_authenticate(self.student)
+
+        first_response = self.client.post(self.url)
+        second_response = self.client.post(self.url)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(YjsContent.objects.count(), 1)
+        self.assertEqual(
+            first_response.data["document_name"],
+            f"class:{self.class_instance.pk}",
+        )
+        self.assertEqual(
+            first_response.data["yjs_content_id"],
+            second_response.data["yjs_content_id"],
+        )
+
+        self.client.force_authenticate(self.tutor)
+        tutor_response = self.client.post(self.url)
+
+        self.assertEqual(tutor_response.status_code, 200)
+        self.assertEqual(
+            tutor_response.data["yjs_content_id"],
+            first_response.data["yjs_content_id"],
+        )
+
+    def test_non_participant_cannot_access_yjs_content(self):
+        self.client.force_authenticate(self.other_user)
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(YjsContent.objects.exists())
+
+    def test_class_without_notebook_cannot_create_yjs_content(self):
+        self.class_instance.notebook = None
+        self.class_instance.save(update_fields=["notebook"])
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(YjsContent.objects.exists())
+
+    def test_notebook_with_different_tutor_cannot_be_accessed(self):
+        other_tutor = get_user_model().objects.create_user(
+            email="yjs-other-tutor@example.com",
+            password="test-password",
+            name="Other tutor",
+            user_type="tutor",
+        )
+        self.class_instance.notebook = Notebook.objects.create(
+            student=self.student,
+            tutor=other_tutor,
+        )
+        self.class_instance.save(update_fields=["notebook"])
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(YjsContent.objects.exists())
+
+    def test_service_can_load_and_save_yjs_state(self):
+        self.client.force_authenticate(self.student)
+        self.client.post(self.url)
+        state_url = (
+            f"/api/classes/v1/{self.class_instance.pk}/yjs-content/state/"
+        )
+        encoded_state = base64.b64encode(b"\x01\x02").decode("ascii")
+
+        with self.settings(COLLABORATION_SERVICE_TOKEN="node-service-secret"):
+            get_response = self.client.get(
+                state_url,
+                HTTP_X_COLLABORATION_SERVICE_KEY="node-service-secret",
+            )
+            put_response = self.client.put(
+                state_url,
+                {"state": encoded_state},
+                format="json",
+                HTTP_X_COLLABORATION_SERVICE_KEY="node-service-secret",
+            )
+            saved_response = self.client.get(
+                state_url,
+                HTTP_X_COLLABORATION_SERVICE_KEY="node-service-secret",
+            )
+
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(get_response.data["state"], base64.b64encode(b"\x00\x00").decode("ascii"))
+        self.assertEqual(put_response.status_code, 200)
+        self.assertEqual(
+            saved_response.data["state"],
+            encoded_state,
+        )
+
+    def test_state_api_rejects_missing_or_invalid_service_key(self):
+        self.client.force_authenticate(self.student)
+        state_url = (
+            f"/api/classes/v1/{self.class_instance.pk}/yjs-content/state/"
+        )
+
+        with self.settings(COLLABORATION_SERVICE_TOKEN="node-service-secret"):
+            missing_key_response = self.client.get(state_url)
+            invalid_key_response = self.client.get(
+                state_url,
+                HTTP_X_COLLABORATION_SERVICE_KEY="wrong-secret",
+            )
+
+        self.assertEqual(missing_key_response.status_code, 403)
+        self.assertEqual(invalid_key_response.status_code, 403)
+
+    def test_state_api_rejects_invalid_base64(self):
+        self.client.force_authenticate(self.student)
+        self.client.post(self.url)
+        state_url = (
+            f"/api/classes/v1/{self.class_instance.pk}/yjs-content/state/"
+        )
+
+        with self.settings(COLLABORATION_SERVICE_TOKEN="node-service-secret"):
+            response = self.client.put(
+                state_url,
+                {"state": "not-base64!"},
+                format="json",
+                HTTP_X_COLLABORATION_SERVICE_KEY="node-service-secret",
+            )
+
+        self.assertEqual(response.status_code, 400)
 
 
 class NotebookApiTests(TestCase):
@@ -254,3 +422,52 @@ class ClassBookingWalletTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(self.wallet.balance, 0)
         self.assertEqual(Classes.objects.filter(student=self.student).count(), 1)
+
+    def test_booking_two_hours_deducts_two_class_credits(self):
+        self.wallet.balance = 2
+        self.wallet.save(update_fields=["balance"])
+
+        response = self.client.post(
+            "/api/schedule/v1/",
+            {
+                "tutor": str(self.tutor.pk),
+                "date_of": self.class_date.isoformat(),
+                "duration": "02:00:00",
+                "activity_type": "class",
+            },
+            format="json",
+        )
+
+        self.wallet.refresh_from_db()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.wallet.balance, 0)
+        self.assertEqual(
+            ClassLedger.objects.filter(
+                wallet=self.wallet,
+                entry_type="debit",
+                amount=2,
+            ).count(),
+            1,
+        )
+
+    def test_booking_more_hours_than_credits_is_rejected(self):
+        self.wallet.balance = 2
+        self.wallet.save(update_fields=["balance"])
+
+        response = self.client.post(
+            "/api/classes/v1/",
+            {
+                "tutor": str(self.tutor.pk),
+                "class_name": "Three-hour booking",
+                "scheduled_date": self.class_date.isoformat(),
+                "duration": "03:00:00",
+                "status": "scheduled",
+            },
+            format="json",
+        )
+
+        self.wallet.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.wallet.balance, 2)
+        self.assertEqual(Classes.objects.filter(student=self.student).count(), 0)
+        self.assertEqual(ClassLedger.objects.filter(wallet=self.wallet).count(), 0)

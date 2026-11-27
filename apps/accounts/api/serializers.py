@@ -54,6 +54,7 @@ class TutorPriceUpdateSerializer(serializers.Serializer):
 
 class StudentActivationSerializer(serializers.Serializer):
     student_id = serializers.UUIDField()
+    is_active = serializers.BooleanField()
 
 
 class CustomTokenSerializer(TokenObtainPairSerializer):

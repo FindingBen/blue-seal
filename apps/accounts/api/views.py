@@ -159,7 +159,7 @@ class ActivateStudentView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        student.is_active = True
+        student.is_active = serializer.validated_data["is_active"]
         student.save(update_fields=["is_active"])
         return Response(
             {

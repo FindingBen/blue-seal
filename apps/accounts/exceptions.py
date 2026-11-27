@@ -12,9 +12,10 @@ class WalletDoesNotExistError(DomainError):
 class InsufficientClassBalanceError(DomainError):
     """Raised when a user tries to book more classes than their wallet holds."""
 
-    def __init__(self, balance):
+    def __init__(self, balance, required_amount):
         super().__init__(
             f"Not enough class credits. You have {balance} class credit(s); "
-            "booking requires 1."
+            f"booking requires {required_amount}."
         )
         self.balance = balance
+        self.required_amount = required_amount

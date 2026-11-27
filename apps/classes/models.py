@@ -64,3 +64,11 @@ class Contents(models.Model):
     class_content = models.JSONField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class YjsContent(models.Model):
+    unique_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    class_id = models.OneToOneField(Classes, on_delete=models.CASCADE)
+    yjs_content = models.BinaryField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)

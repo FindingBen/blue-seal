@@ -314,13 +314,13 @@ class TutorPriceUpdateApiTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(other_student.price_per_class, 15)
 
-    def test_tutor_can_activate_own_student(self):
+    def test_tutor_can_activate_and_deactivate_own_student(self):
         self.student.is_active = False
         self.student.save(update_fields=["is_active"])
 
         response = self.client.post(
             "/api/accounts/students/activate/",
-            {"student_id": str(self.student.account_id)},
+            {"student_id": str(self.student.account_id), "is_active": True},
             format="json",
         )
 
@@ -334,6 +334,17 @@ class TutorPriceUpdateApiTests(TestCase):
                 "is_active": True,
             },
         )
+
+        response = self.client.post(
+            "/api/accounts/students/activate/",
+            {"student_id": str(self.student.account_id), "is_active": False},
+            format="json",
+        )
+
+        self.student.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.student.is_active)
+        self.assertEqual(response.json()["is_active"], False)
 
     def test_tutor_cannot_activate_student_invited_by_another_tutor(self):
         other_tutor = User.objects.create_user(
@@ -353,7 +364,7 @@ class TutorPriceUpdateApiTests(TestCase):
 
         response = self.client.post(
             "/api/accounts/students/activate/",
-            {"student_id": str(other_student.account_id)},
+            {"student_id": str(other_student.account_id), "is_active": False},
             format="json",
         )
 

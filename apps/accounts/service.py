@@ -63,21 +63,25 @@ class WalletTransactionService:
 
     @staticmethod
     @transaction.atomic
-    def consume_class_credit(user_id: str, reference_id: str) -> None:
+    def consume_class_credit(
+        user_id: str,
+        reference_id: str,
+        amount: int,
+    ) -> None:
         try:
             wallet = Wallet.objects.select_for_update().get(user_id=user_id)
         except Wallet.DoesNotExist as exc:
             raise WalletDoesNotExistError(user_id) from exc
 
-        if wallet.balance < 1:
-            raise InsufficientClassBalanceError(wallet.balance)
+        if wallet.balance < amount:
+            raise InsufficientClassBalanceError(wallet.balance, amount)
 
-        wallet.balance -= 1
+        wallet.balance -= amount
         wallet.save(update_fields=["balance", "updated_at"])
         ClassLedger.objects.create(
             wallet=wallet,
             entry_type="debit",
-            amount=1,
+            amount=amount,
             reference_id=reference_id,
             note="Class booked",
         )

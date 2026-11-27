@@ -1,7 +1,9 @@
-from .models import Classes, Notebook
+import math
+
+from .models import Classes, Notebook, YjsContent
 from django.db import transaction
-from django.db.models import Q
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from django.db.models import F, Q
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from apps.accounts.exceptions import (
     InsufficientClassBalanceError,
     WalletDoesNotExistError,
@@ -35,6 +37,7 @@ class ClassesService:
             WalletTransactionService.consume_class_credit(
                 str(user.pk),
                 str(class_instance.pk),
+                max(1, math.ceil(class_data["duration"].total_seconds() / 3600)),
             )
         except (InsufficientClassBalanceError, WalletDoesNotExistError) as exc:
             raise ValidationError(str(exc)) from exc
@@ -94,3 +97,49 @@ class NotebookService:
             )
 
         return Notebook.objects.create(student=student, tutor=user)
+
+
+class YjsContentService:
+    @staticmethod
+    @transaction.atomic
+    def create_yjs_content(content_data, user):
+        class_instance = Classes.objects.filter(
+            class_id=content_data["class_id"],
+            notebook__isnull=False,
+            notebook__student_id=F("student_id"),
+            notebook__tutor_id=F("tutor_id"),
+        ).filter(
+            Q(student=user, student__user_type="regular")
+            | Q(tutor=user, tutor__user_type="tutor"),
+        ).first()
+        if class_instance is None:
+            raise PermissionDenied(
+                "You do not have access to this class notebook."
+            )
+
+        content, _ = YjsContent.objects.get_or_create(
+            class_id=class_instance,
+            defaults={"yjs_content": b"\x00\x00"},
+        )
+        return content
+
+    @staticmethod
+    def get_yjs_content(class_id):
+        try:
+            return YjsContent.objects.get(class_id=class_id)
+        except YjsContent.DoesNotExist as exc:
+            raise NotFound("Yjs content not found.") from exc
+
+    @staticmethod
+    @transaction.atomic
+    def update_yjs_content(class_id, state):
+        try:
+            content = YjsContent.objects.select_for_update().get(
+                class_id=class_id
+            )
+        except YjsContent.DoesNotExist as exc:
+            raise NotFound("Yjs content not found.") from exc
+
+        content.yjs_content = state
+        content.save(update_fields=["yjs_content", "updated_at"])
+        return content

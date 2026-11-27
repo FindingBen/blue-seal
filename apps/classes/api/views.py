@@ -1,12 +1,61 @@
+import base64
+import hmac
+
+from django.conf import settings
 from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.views import APIView
 from django.db.models import Q
-from .serializers import ClassesSerializer, ContentsSerializer, NotebookSerializer
+from .serializers import (
+    ClassesSerializer,
+    ContentsSerializer,
+    NotebookSerializer,
+    YjsContentStateSerializer,
+)
 from apps.classes.models import Contents, Notebook
-from apps.classes.service import ClassesService, NotebookService
+from apps.classes.service import (
+    ClassesService,
+    NotebookService,
+    YjsContentService,
+)
+
+
+class CollaborationServicePermission(BasePermission):
+    def has_permission(self, request, view):
+        expected_token = settings.COLLABORATION_SERVICE_TOKEN
+        provided_token = request.headers.get("X-Collaboration-Service-Key", "")
+        return bool(
+            expected_token
+            and provided_token
+            and hmac.compare_digest(expected_token, provided_token)
+        )
+
+
+class YjsContentStateView(APIView):
+    authentication_classes = []
+    permission_classes = [CollaborationServicePermission]
+
+    def get(self, request, class_id):
+        content = YjsContentService.get_yjs_content(class_id)
+        return Response(
+            {
+                "state": base64.b64encode(
+                    bytes(content.yjs_content)
+                ).decode("ascii")
+            }
+        )
+
+    def put(self, request, class_id):
+        serializer = YjsContentStateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        content = YjsContentService.update_yjs_content(
+            class_id,
+            serializer.validated_data["state"],
+        )
+        return Response({"updated_at": content.updated_at})
 
 
 class TutorBookedClassesView(viewsets.ViewSet):
@@ -45,6 +94,19 @@ class ClassesViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="yjs-content")
+    def yjs_content(self, request, pk=None):
+        content = YjsContentService.create_yjs_content(
+            {"class_id": pk},
+            request.user,
+        )
+        return Response(
+            {
+                "document_name": f"class:{content.class_id_id}",
+                "yjs_content_id": str(content.unique_id),
+            }
+        )
 
     def perform_create(self, serializer):
         class_data = serializer.validated_data
