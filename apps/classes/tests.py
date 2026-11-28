@@ -124,9 +124,20 @@ class YjsContentApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(YjsContent.objects.exists())
 
-    def test_class_without_notebook_cannot_create_yjs_content(self):
+    def test_existing_unlinked_class_uses_students_matching_notebook(self):
         self.class_instance.notebook = None
         self.class_instance.save(update_fields=["notebook"])
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(self.url)
+
+        self.class_instance.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.class_instance.notebook, self.notebook)
+
+    def test_class_without_matching_notebook_cannot_create_yjs_content(self):
+        self.notebook.delete()
+        self.class_instance.refresh_from_db()
         self.client.force_authenticate(self.student)
 
         response = self.client.post(self.url)
@@ -335,19 +346,24 @@ class TutorBookedClassesApiTests(TestCase):
 class ClassBookingWalletTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
-        self.student = user_model.objects.create_user(
-            email="wallet-booking-student@example.com",
-            password="test-password",
-            name="Student",
-            user_type="regular",
-        )
         self.tutor = user_model.objects.create_user(
             email="wallet-booking-tutor@example.com",
             password="test-password",
             name="Tutor",
             user_type="tutor",
         )
+        self.student = user_model.objects.create_user(
+            email="wallet-booking-student@example.com",
+            password="test-password",
+            name="Student",
+            user_type="regular",
+            tutor=self.tutor,
+        )
         self.wallet = Wallet.objects.create(user=self.student, balance=1)
+        self.notebook = Notebook.objects.create(
+            student=self.student,
+            tutor=self.tutor,
+        )
         self.client = APIClient()
         self.client.force_authenticate(self.student)
         self.class_date = timezone.now() + timedelta(days=2)
@@ -382,6 +398,29 @@ class ClassBookingWalletTests(TestCase):
             1,
         )
         self.assertEqual(Classes.objects.filter(student=self.student).count(), 1)
+        self.assertEqual(
+            Classes.objects.get(student=self.student).notebook,
+            self.notebook,
+        )
+
+    def test_booking_without_tutor_created_notebook_is_rejected(self):
+        self.notebook.delete()
+
+        response = self.client.post(
+            "/api/schedule/v1/",
+            {
+                "tutor": str(self.tutor.pk),
+                "date_of": self.class_date.isoformat(),
+                "duration": "01:00:00",
+                "activity_type": "class",
+            },
+            format="json",
+        )
+
+        self.wallet.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Classes.objects.filter(student=self.student).exists())
+        self.assertEqual(self.wallet.balance, 1)
 
     def test_booking_without_class_credit_is_rejected_without_creating_booking(self):
         self.wallet.balance = 0
@@ -422,6 +461,48 @@ class ClassBookingWalletTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(self.wallet.balance, 0)
         self.assertEqual(Classes.objects.filter(student=self.student).count(), 1)
+        self.assertEqual(
+            Classes.objects.get(student=self.student).notebook,
+            self.notebook,
+        )
+
+    def test_student_cannot_book_with_another_students_notebook(self):
+        user_model = get_user_model()
+        other_tutor = user_model.objects.create_user(
+            email="other-booking-tutor@example.com",
+            password="test-password",
+            name="Other tutor",
+            user_type="tutor",
+        )
+        other_student = user_model.objects.create_user(
+            email="other-booking-student@example.com",
+            password="test-password",
+            name="Other student",
+            user_type="regular",
+            tutor=other_tutor,
+        )
+        other_notebook = Notebook.objects.create(
+            student=other_student,
+            tutor=other_tutor,
+        )
+
+        response = self.client.post(
+            "/api/classes/v1/",
+            {
+                "tutor": str(self.tutor.pk),
+                "notebook": str(other_notebook.pk),
+                "class_name": "Invalid notebook booking",
+                "scheduled_date": self.class_date.isoformat(),
+                "duration": "01:00:00",
+                "status": "scheduled",
+            },
+            format="json",
+        )
+
+        self.wallet.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Classes.objects.filter(student=self.student).exists())
+        self.assertEqual(self.wallet.balance, 1)
 
     def test_booking_two_hours_deducts_two_class_credits(self):
         self.wallet.balance = 2

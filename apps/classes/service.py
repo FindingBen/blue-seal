@@ -2,7 +2,7 @@ import math
 
 from .models import Classes, Notebook, YjsContent
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import Q
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from apps.accounts.exceptions import (
     InsufficientClassBalanceError,
@@ -15,9 +15,27 @@ class ClassesService:
     @transaction.atomic
     def create_class(class_data, user):
         """Create a class for the given user."""
+        if user.user_type != "regular":
+            raise PermissionDenied("Only students can book classes.")
+
         notebook = class_data.get("notebook")
-        tutor = class_data["tutor"]
-        if notebook is not None and (
+        tutor = class_data.get("tutor")
+        if (
+            tutor is None
+            or tutor.user_type != "tutor"
+            or user.tutor_id != tutor.pk
+        ):
+            raise ValidationError(
+                "You can only book classes with your assigned tutor."
+            )
+
+        if notebook is None:
+            notebook = ClassesService.get_matching_notebook(user, tutor)
+        if notebook is None:
+            raise ValidationError(
+                "Your tutor must create a notebook before you can book a class."
+            )
+        if (
             notebook.student_id != user.pk or notebook.tutor_id != tutor.pk
         ):
             raise ValidationError(
@@ -42,6 +60,13 @@ class ClassesService:
         except (InsufficientClassBalanceError, WalletDoesNotExistError) as exc:
             raise ValidationError(str(exc)) from exc
         return class_instance
+
+    @staticmethod
+    def get_matching_notebook(student, tutor):
+        return Notebook.objects.filter(
+            student=student,
+            tutor=tutor,
+        ).order_by("created_at", "notebook_id").first()
 
     @staticmethod
     def update_class(class_instance, class_data, user):
@@ -105,14 +130,31 @@ class YjsContentService:
     def create_yjs_content(content_data, user):
         class_instance = Classes.objects.filter(
             class_id=content_data["class_id"],
-            notebook__isnull=False,
-            notebook__student_id=F("student_id"),
-            notebook__tutor_id=F("tutor_id"),
         ).filter(
             Q(student=user, student__user_type="regular")
             | Q(tutor=user, tutor__user_type="tutor"),
         ).first()
         if class_instance is None:
+            raise PermissionDenied(
+                "You do not have access to this class notebook."
+            )
+
+        notebook = class_instance.notebook
+        if notebook is None:
+            notebook = ClassesService.get_matching_notebook(
+                class_instance.student,
+                class_instance.tutor,
+            )
+            if notebook is None:
+                raise PermissionDenied(
+                    "You do not have access to this class notebook."
+                )
+            class_instance.notebook = notebook
+            class_instance.save(update_fields=["notebook"])
+        elif (
+            notebook.student_id != class_instance.student_id
+            or notebook.tutor_id != class_instance.tutor_id
+        ):
             raise PermissionDenied(
                 "You do not have access to this class notebook."
             )
