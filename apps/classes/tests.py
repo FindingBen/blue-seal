@@ -343,6 +343,65 @@ class TutorBookedClassesApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+class TutorClassNameUpdateApiTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.tutor = user_model.objects.create_user(
+            email="class-name-tutor@example.com",
+            password="test-password",
+            name="Tutor",
+            user_type="tutor",
+        )
+        self.other_tutor = user_model.objects.create_user(
+            email="class-name-other-tutor@example.com",
+            password="test-password",
+            name="Other tutor",
+            user_type="tutor",
+        )
+        self.student = user_model.objects.create_user(
+            email="class-name-student@example.com",
+            password="test-password",
+            name="Student",
+            user_type="regular",
+        )
+        self.class_instance = Classes.objects.create(
+            student=self.student,
+            tutor=self.tutor,
+            status="scheduled",
+            scheduled_date=timezone.now() + timedelta(days=1),
+            duration=timedelta(hours=1),
+            class_name="Original class name",
+        )
+        self.client = APIClient()
+        self.url = f"/api/classes/v1/{self.class_instance.pk}/"
+
+    def test_assigned_tutor_can_update_class_name(self):
+        self.client.force_authenticate(self.tutor)
+
+        response = self.client.patch(
+            self.url,
+            {"class_name": "Updated class name"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.class_instance.refresh_from_db()
+        self.assertEqual(self.class_instance.class_name, "Updated class name")
+
+    def test_other_tutor_cannot_update_class_name(self):
+        self.client.force_authenticate(self.other_tutor)
+
+        response = self.client.patch(
+            self.url,
+            {"class_name": "Unauthorized name"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.class_instance.refresh_from_db()
+        self.assertEqual(self.class_instance.class_name, "Original class name")
+
+
 class ClassBookingWalletTests(TestCase):
     def setUp(self):
         user_model = get_user_model()

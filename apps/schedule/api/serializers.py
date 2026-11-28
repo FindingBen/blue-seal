@@ -48,3 +48,37 @@ class ScheduleSerializer(serializers.ModelSerializer):
         model = Schedule
         fields = "__all__"
         read_only_fields = ["schedule_id", "account_id","class_id"]
+
+
+class TutorScheduleUpdateSerializer(serializers.Serializer):
+    class_id = serializers.UUIDField()
+    date_of = serializers.DateTimeField(required=False)
+    status = serializers.ChoiceField(
+        choices=[("cancelled", "Cancelled"), ("rescheduled", "Rescheduled")],
+        required=False,
+    )
+
+    def validate(self, attrs):
+        if "class_id" not in attrs:
+            raise serializers.ValidationError(
+                {"class_id": "This field is required."}
+            )
+
+        if attrs.get("status") == "cancelled":
+            if "date_of" in attrs:
+                raise serializers.ValidationError(
+                    {"date_of": "A cancelled class cannot also be rescheduled."}
+                )
+        elif "date_of" not in attrs:
+            raise serializers.ValidationError(
+                {"date_of": "Provide a new date to reschedule the class."}
+            )
+
+        return attrs
+
+    def to_representation(self, instance):
+        return {
+            "class_id": str(instance.class_id_id),
+            "date_of": self.fields["date_of"].to_representation(instance.date_of),
+            "status": instance.class_id.status,
+        }

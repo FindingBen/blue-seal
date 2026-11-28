@@ -1,7 +1,8 @@
 from .models import Schedule
 from django.conf import settings
 from django.db import transaction
-from rest_framework.exceptions import ValidationError
+from django.db.models import Q
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.accounts.models import User
 from apps.classes.models import Classes
 from .exceptions import UserTypeError
@@ -14,11 +15,24 @@ class ScheduleService:
 
     @staticmethod
     def get_schedules_for_user(user):
-        return Schedule.objects.filter(account_id=user.account_id)
+        return Schedule.objects.filter(account_id=user.account_id).exclude(
+            activity_type="class",
+            class_id__status="cancelled",
+        )
 
     @staticmethod
-    def get_tutor_schedules_for_user():
-        return Schedule.objects.filter(activity_type__in=['available','unavailable'])
+    def get_tutor_schedules_for_user(user):
+        if user.user_type != "tutor":
+            return Schedule.objects.none()
+
+        return Schedule.objects.filter(
+            Q(account_id=user, activity_type__in=["available", "unavailable"])
+            | Q(
+                class_id__tutor=user,
+                class_id__status__in=["scheduled", "rescheduled", "in_progress"],
+                activity_type="class",
+            )
+        )
 
     @staticmethod
     def get_tutor_calendar():
@@ -80,12 +94,61 @@ class ScheduleService:
             duration=class_data["duration"],
         )
 
+    @staticmethod
+    @transaction.atomic
+    def update_schedule(schedule, class_data, user):
+        if user.user_type != "tutor":
+            raise PermissionDenied("Only tutors can update booked classes.")
+        if (
+            schedule.activity_type != "class"
+            or schedule.class_id_id != class_data["class_id"]
+        ):
+            raise ValidationError("The class ID must match this booked schedule.")
+
+        class_instance = Classes.objects.select_for_update().filter(
+            class_id=class_data["class_id"],
+            tutor=user,
+            status__in=["scheduled", "rescheduled"],
+        ).first()
+        if (
+            class_instance is None
+            or schedule.account_id_id != class_instance.student_id
+        ):
+            raise PermissionDenied("You can only update your own booked classes.")
+
+        if class_data.get("status") == "cancelled":
+            class_instance.status = "cancelled"
+            class_instance.save(update_fields=["status", "updated_at"])
+            return schedule
+
+        new_date = class_data["date_of"]
+        date_validation = Schedule.date_validation(new_date)
+        if date_validation["status"] == 400:
+            raise ValidationError(date_validation["message"])
+
+        ScheduleService.check_availability(
+            user,
+            new_date,
+            class_instance.duration,
+            exclude_class_id=class_instance.pk,
+        )
+
+        class_instance.scheduled_date = new_date
+        class_instance.status = "rescheduled"
+        class_instance.save(
+            update_fields=["scheduled_date", "status", "updated_at"]
+        )
+        schedule.date_of = new_date
+        schedule.save(update_fields=["date_of"])
+        return schedule
 
     @staticmethod
     @transaction.atomic
     def create_availability(user, data):
         if user.user_type != ScheduleService.user_type_val:
             raise UserTypeError("You can't select availability!")
+        if data["activity_type"] not in {"available", "unavailable"}:
+            raise ValidationError("Only availability can be created here.")
 
         schedule = Schedule.objects.create(
             account_id=user,
@@ -143,15 +206,18 @@ class ScheduleService:
                 )
 
     @staticmethod
-    def check_availability(tutor, selected_date, duration):
+    def check_availability(
+        tutor,
+        selected_date,
+        duration,
+        exclude_class_id=None,
+    ):
         requested_end = selected_date + duration
         available_slots = Schedule.objects.filter(
             account_id=tutor,
             activity_type="available",
             date_of__lte=selected_date,
         )
-        print("DATE REQ",requested_end)
-        print("AVA",available_slots)
         if not any(
             slot.date_of + slot.duration >= requested_end
             for slot in available_slots
@@ -178,6 +244,8 @@ class ScheduleService:
             status__in=["scheduled", "rescheduled", "in_progress"],
             scheduled_date__lt=requested_end,
         )
+        if exclude_class_id is not None:
+            booked_classes = booked_classes.exclude(class_id=exclude_class_id)
         if any(
             class_object.scheduled_date + class_object.duration > selected_date
             for class_object in booked_classes

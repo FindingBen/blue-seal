@@ -1,4 +1,5 @@
 from rest_framework import viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,6 +7,7 @@ from .serializers import (
     BookedSessionSerializer,
     CalendarAvailabilitySerializer,
     ScheduleSerializer,
+    TutorScheduleUpdateSerializer,
 )
 from apps.schedule.service import ScheduleService
 
@@ -45,9 +47,30 @@ class TutorScheduleView(viewsets.ModelViewSet):
 
     def get_queryset(self):
         "Get shcedules for user"
-        return ScheduleService.get_tutor_schedules_for_user()
+        return ScheduleService.get_tutor_schedules_for_user(self.request.user)
+
+    def get_serializer_class(self):
+        if self.action in {"update", "partial_update"}:
+            return TutorScheduleUpdateSerializer
+        return self.serializer_class
 
     def perform_create(self, serializer):
         class_data = serializer.validated_data
         schedule = ScheduleService.create_availability(self.request.user, class_data)
         serializer.instance = schedule
+
+    def perform_update(self, serializer):
+        class_data = serializer.validated_data
+        schedule = ScheduleService.update_schedule(
+            serializer.instance,
+            class_data,
+            self.request.user,
+        )
+        serializer.instance = schedule
+
+    def perform_destroy(self, instance):
+        if instance.activity_type == "class":
+            raise ValidationError(
+                "Cancel a booked class by updating its status."
+            )
+        instance.delete()

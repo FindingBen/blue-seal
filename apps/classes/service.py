@@ -70,7 +70,17 @@ class ClassesService:
 
     @staticmethod
     def update_class(class_instance, class_data, user):
-        """Update only the status of a class owned by the given user."""
+        """Update allowed class fields for the class participant."""
+        if user.user_type == "tutor":
+            if class_instance.tutor_id != user.pk:
+                raise ValidationError("You do not own this class.")
+            if set(class_data) != {"class_name"}:
+                raise ValidationError("Tutors can only update the class name.")
+
+            class_instance.class_name = class_data["class_name"]
+            class_instance.save(update_fields=["class_name", "updated_at"])
+            return class_instance
+
         if set(class_data) != {"status"}:
             raise ValidationError("Only status can be updated.")
         if class_instance.student_id != user.pk:
